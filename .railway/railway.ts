@@ -27,12 +27,18 @@ const dbConnectionUri =
   "postgresql+psycopg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@" +
   pgEndpoint;
 
+// This template lives on stornes/honcho. Apply deploys that fork's main.
 const source = github("stornes/honcho", { branch: "main" });
 
 const imageBuild = {
   builder: "DOCKERFILE" as const,
   dockerfilePath: "Dockerfile",
 };
+
+// Railway healthchecks the injected PORT. docker/entrypoint.sh listens on
+// 8000 and never reads PORT. Run the same migration, then bind PORT.
+const apiStart =
+  'sh -c \'/app/.venv/bin/python scripts/provision_db.py && exec /app/.venv/bin/fastapi run --host 0.0.0.0 --port "${PORT:-8000}" --workers "${API_WORKERS:-1}" src/main.py\'';
 
 export default defineRailway(() => {
   // Railway Postgres 18. The image ships pgvector. Migrations create the
@@ -42,8 +48,7 @@ export default defineRailway(() => {
   const api = service("api", {
     source,
     build: imageBuild,
-    // docker/entrypoint.sh migrates, then listens on port 8000.
-    start: "sh docker/entrypoint.sh",
+    start: apiStart,
     healthcheck: "/health",
     healthcheckTimeout: 300,
     deploy: {
@@ -56,9 +61,8 @@ export default defineRailway(() => {
       VECTOR_STORE_TYPE: "pgvector",
       // Public URL. Turn this off only for a private network with no domain.
       AUTH_USE_AUTH: "true",
-      // Railway generates this on apply. It is not stored in git.
-      AUTH_JWT_SECRET: { generator: "secret(32)", isSealed: true },
-      // Set before the first apply. See docs/railway.md.
+      // Set both before the first apply. preserve() keeps them across applies.
+      AUTH_JWT_SECRET: preserve(),
       LLM_OPENAI_API_KEY: preserve(),
     },
   });
