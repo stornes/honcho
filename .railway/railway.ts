@@ -7,17 +7,10 @@
 //
 // "${{Service.VAR}}" strings are Railway reference variables. They are
 // resolved by Railway at deploy time. No secret values live in this file.
-// preserve() keeps a value you set with `railway variable set`. A variable
-// that exists in Railway but is absent here is deleted on the next apply.
+// A variable that exists in Railway but is absent here is deleted on the
+// next apply.
 
-import {
-  defineRailway,
-  github,
-  postgres,
-  preserve,
-  project,
-  service,
-} from "railway/iac";
+import { defineRailway, github, postgres, project, service } from "railway/iac";
 
 // Private-network host:port/database. Honcho's SQLAlchemy URL must use the
 // psycopg driver prefix. Railway's DATABASE_URL uses postgresql://.
@@ -59,11 +52,14 @@ export default defineRailway(() => {
     env: {
       DB_CONNECTION_URI: dbConnectionUri,
       VECTOR_STORE_TYPE: "pgvector",
-      // Public URL. Turn this off only for a private network with no domain.
-      AUTH_USE_AUTH: "true",
-      // Set both before the first apply. preserve() keeps them across applies.
-      AUTH_JWT_SECRET: preserve(),
-      LLM_OPENAI_API_KEY: preserve(),
+      // Self-host default (AuthSettings.USE_AUTH). true requires a Bearer JWT
+      // on every request — honcho init calls that path "Paste an API key" —
+      // and refuses to boot without AUTH_JWT_SECRET. This server has no
+      // browser-login routes. Device login is offered only when a host
+      // advertises the OAuth device grant. Managed api.honcho.dev does.
+      // This repository does not. Leave auth off so entry is not a pasted key.
+      // Do not add a public domain while this is false: every caller is admin.
+      AUTH_USE_AUTH: "false",
     },
   });
 
@@ -81,7 +77,6 @@ export default defineRailway(() => {
     env: {
       DB_CONNECTION_URI: dbConnectionUri,
       VECTOR_STORE_TYPE: "pgvector",
-      LLM_OPENAI_API_KEY: "${{api.LLM_OPENAI_API_KEY}}",
     },
   });
 

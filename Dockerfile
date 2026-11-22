@@ -25,7 +25,9 @@ COPY uv.lock pyproject.toml /app/
 #   docker build --build-arg INSTALL_LANCEDB=true .
 ARG INSTALL_LANCEDB=false
 ARG INSTALL_SURPRISAL=false
-RUN --mount=type=cache,target=/root/.cache/uv \
+# Railway's Dockerfile parser requires an explicit cache id. BuildKit
+# defaults id to the target path when it is omitted.
+RUN --mount=type=cache,id=uv,target=/root/.cache/uv \
     set --; \
     case "$INSTALL_LANCEDB" in \
         true) set -- "$@" --extra lancedb ;; \
