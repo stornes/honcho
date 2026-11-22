@@ -10,6 +10,18 @@ Redis is not included. Cache stays off unless you set `CACHE_ENABLED` and `CACHE
 
 `railway.toml` is not used. Railway no longer accepts Config as Code on new services.
 
+## Auth
+
+`AUTH_USE_AUTH` is `false`. That is Honcho's self-host default (`AuthSettings.USE_AUTH`).
+
+`true` is API-key auth. Every request needs `Authorization: Bearer <jwt>`, and the process will not boot without `AUTH_JWT_SECRET`. `honcho init` calls that path "Paste an API key".
+
+This server has no login routes. Browser login in `honcho init` appears only when the host serves `/.well-known/oauth-authorization-server` with the device grant. That is managed Honcho (`api.honcho.dev`). This repository does not implement those routes, so a Railway deploy cannot offer that login.
+
+With auth off, no API key is required. `honcho init --base-url <api url>` can skip the key. Every caller is an admin. Do not generate a public domain until you turn auth on.
+
+Leave `MULTI_TENANT` unset. This template is single-tenant. Multi-tenant mode refuses to boot when `AUTH_USE_AUTH` is off.
+
 ## Apply
 
 Install the [Railway CLI](https://docs.railway.com/cli), then from the repo root:
@@ -17,33 +29,34 @@ Install the [Railway CLI](https://docs.railway.com/cli), then from the repo root
 ```bash
 railway init --name honcho
 railway add --service api
-uv run python scripts/generate_jwt_secret.py
-railway variable set LLM_OPENAI_API_KEY --stdin --service api --skip-deploys
-railway variable set AUTH_JWT_SECRET --stdin --service api --skip-deploys
 railway config plan
 railway config apply
 ```
 
-Paste each value when `railway variable set` reads stdin. Use the hex printed by `scripts/generate_jwt_secret.py` for `AUTH_JWT_SECRET`. Both variables are `preserve()`, so apply stops if one is missing, and a later apply does not replace them. Do not commit either value.
-
 `railway config apply` creates the Postgres service and the deriver. The services deploy `stornes/honcho` branch `main`.
+
+Do not set `AUTH_JWT_SECRET`. Do not paste `LLM_OPENAI_API_KEY` to get in.
 
 ## After apply
 
-1. On the **api** service, generate a public domain. Leave the target port on Railway's `PORT`.
-2. Open `https://<your-domain>/health`. It returns `{"status":"ok"}`.
+1. Leave the api service without a public domain while `AUTH_USE_AUTH` is false.
+2. The api and deriver processes can boot without an LLM key. `/health` does not call a model.
 3. The deriver may exit before the first migration finishes. Redeploy it if it stops.
-4. Mint an admin JWT. `AUTH_USE_AUTH` is `true`. Copy `AUTH_JWT_SECRET` from the api service, then locally:
 
-```bash
-AUTH_JWT_SECRET='<secret from Railway>' uv run python scripts/generate_jwt.py --admin
-```
+## LLM provider key
 
-Send that token as `Authorization: Bearer <jwt>`.
+The API starts without a provider key. Memory, chat, summaries, dreams, and embeddings do not.
 
-The deriver reads `LLM_OPENAI_API_KEY` from the api service. Set the key only on api.
+Built-in defaults use OpenAI:
 
-`DB_CONNECTION_URI` is built from the Postgres private-network variables, with the `postgresql+psycopg://` scheme Honcho requires. If the password contains reserved URL characters, encode them.
+- deriver, dialectic, summary, and dreamer: `gpt-5.4-mini`
+- embeddings: `text-embedding-3-small`
+
+Set `LLM_OPENAI_API_KEY` on the **api** service when you have a key. Set the same name on **deriver** to `${{api.LLM_OPENAI_API_KEY}}`.
+
+That key is not an access credential. Do not commit it. A variable set only in the dashboard is removed on the next apply, so add both lines to `.railway/railway.ts` as `preserve()` on api and the reference on deriver before you apply again. `preserve()` stops apply when the value is missing, which is why this file does not include it yet.
+
+`LLM_ANTHROPIC_API_KEY` or `LLM_GEMINI_API_KEY` work only if you also change the model transport. The defaults above do not read them.
 
 ## Variables
 
@@ -51,12 +64,8 @@ The deriver reads `LLM_OPENAI_API_KEY` from the api service. Set the key only on
 | --- | --- | --- |
 | `DB_CONNECTION_URI` | api, deriver | Postgres private host, user, password, and database |
 | `VECTOR_STORE_TYPE` | api, deriver | `pgvector` |
-| `LLM_OPENAI_API_KEY` | api; deriver references api | your OpenAI key |
-| `AUTH_USE_AUTH` | api | `true` |
-| `AUTH_JWT_SECRET` | api | set before apply, then kept |
+| `AUTH_USE_AUTH` | api | `false` |
 
-Optional keys already supported by Honcho, such as `LLM_ANTHROPIC_API_KEY`, `LLM_GEMINI_API_KEY`, and `CORS_ORIGINS`, can be added in `.railway/railway.ts`. A variable set only in the dashboard is removed on the next apply.
+`DB_CONNECTION_URI` is built from the Postgres private-network variables, with the `postgresql+psycopg://` scheme Honcho requires. If the password contains reserved URL characters, encode them.
 
 `CORS_ORIGINS` defaults do not include a Railway domain. Add your domain before calling the API from a browser.
-
-Leave `MULTI_TENANT` unset. This template is single-tenant.

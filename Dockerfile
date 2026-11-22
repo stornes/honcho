@@ -11,7 +11,7 @@ WORKDIR /app
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
 
-# Copy from the cache instead of linking since it's a mounted volume
+# copy avoids hardlinks. This image does not mount a uv cache.
 ENV UV_LINK_MODE=copy
 
 # Python optimizations
@@ -25,7 +25,9 @@ COPY uv.lock pyproject.toml /app/
 #   docker build --build-arg INSTALL_LANCEDB=true .
 ARG INSTALL_LANCEDB=false
 ARG INSTALL_SURPRISAL=false
-RUN --mount=type=cache,target=/root/.cache/uv \
+# No cache mount. Railway's parser requires id=s/<service id>-<target>,
+# and this image is built by more than one service.
+RUN \
     set --; \
     case "$INSTALL_LANCEDB" in \
         true) set -- "$@" --extra lancedb ;; \
