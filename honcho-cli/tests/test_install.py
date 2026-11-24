@@ -122,10 +122,11 @@ def test_codex_self_hosted_uses_config_url_and_jwt(machine, tmp_path, monkeypatc
     result = runner.invoke(app, ["install", "codex"])
     assert result.exit_code == 0, result.output
     assert [(argv[:3], quiet) for argv, quiet in ran] == [
-        (["bun", "--cwd", str(mcp_dir)], True),
+        (["bun", "install", "--cwd"], True),
         (["codex", "mcp", "add"], False),
         (["npx", "-y", "skills"], True),
     ]
+    assert ran[0][0] == ["bun", "install", "--cwd", str(mcp_dir), "--frozen-lockfile"]
     add = ran[1][0]
     assert f"HONCHO_API_KEY={KEY}" in add
     assert f"HONCHO_API_URL={SELF_HOSTED}" in add

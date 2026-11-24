@@ -269,7 +269,9 @@ def _codex_install(creds: Credentials) -> list[list[str]]:
     mcp_dir = _mcp_package_dir()
     assert mcp_dir is not None  # detect() blocks before install when missing
     return [
-        Quiet(["bun", "--cwd", str(mcp_dir), "install", "--frozen-lockfile"]),
+        # `bun --cwd DIR install` treats `install` as a package.json script
+        # (Script not found "install"). Subcommand first: bun install --cwd …
+        Quiet(["bun", "install", "--cwd", str(mcp_dir), "--frozen-lockfile"]),
         [
             "codex", "mcp", "add", "honcho",
             "--env", f"HONCHO_API_KEY={creds.api_key}",

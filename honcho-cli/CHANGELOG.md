@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Fixed
 
+- Self-hosted `honcho install codex` runs `bun install --cwd <mcp> --frozen-lockfile`. The previous `bun --cwd <mcp> install …` made Bun look for a package.json script named `install` and exit with `Script not found "install"`
 - `uvx honcho-cli <command>` runs the CLI. The package now also installs a `honcho-cli` executable alongside `honcho`; before, uvx stopped with "An executable named `honcho-cli` is not provided", so the documented `uvx honcho-cli` and a one-line `uvx honcho-cli install` both failed
 
 ## [0.6.0] - 2026-11-10
