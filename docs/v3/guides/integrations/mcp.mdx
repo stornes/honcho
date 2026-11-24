@@ -94,7 +94,9 @@ Or if you prefer the [Claude Code Honcho plugin](/v3/guides/integrations/claudec
 
 ### Codex
 
-Add to `~/.codex/config.toml`:
+`honcho install` wires Codex for you. With managed Honcho (`environmentUrl` / `HONCHO_BASE_URL` = `https://api.honcho.dev`) it registers the hosted MCP server. With a self-hosted URL and API key/JWT in `~/.honcho/config.json` (or env), it registers a local stdio MCP pointed at that URL — same path as [Run locally](#run-locally) — and needs [Bun](https://bun.sh) plus this repo's `mcp/` package (`HONCHO_MCP_DIR`, or run install from a honcho checkout).
+
+Manual hosted config in `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.honcho]
@@ -109,8 +111,17 @@ args = [
 ]
 ```
 
+Manual self-hosted stdio (replace the path and values):
+
+```toml
+[mcp_servers.honcho]
+command = "bun"
+args = ["--cwd", "/absolute/path/to/honcho/mcp", "src/stdio.ts"]
+env = { HONCHO_API_KEY = "your-jwt-or-key", HONCHO_API_URL = "https://your-honcho-api" }
+```
+
 <Note>
-Codex only supports stdio transport, so it uses `mcp-remote` as a bridge. Restart both the Codex CLI and VS Code extension after editing.
+Codex only supports stdio transport for a local process, so the hosted path uses `mcp-remote` as a bridge. Restart both the Codex CLI and VS Code extension after editing.
 </Note>
 
 ### Cursor

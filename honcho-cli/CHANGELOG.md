@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `honcho install` Codex works with self-hosted Honcho. When `environmentUrl` / `HONCHO_BASE_URL` is not `https://api.honcho.dev`, Codex is no longer blocked as hosted-only; install registers a local stdio MCP with `HONCHO_API_URL` and `HONCHO_API_KEY` from the CLI config (needs Bun and this repo's `mcp/` package via `HONCHO_MCP_DIR` or a checkout). Managed Honcho still uses `mcp-remote` → `https://mcp.honcho.dev`
+
 ### Added
 
 - Experimental, off unless `HONCHO_EXPERIMENTAL=1` is set: the `honcho ingest` commands, `peer`/`session` `exclude` and `include`, and `workspace create --auto` below. They're labeled "Experimental" in help, may change or stop working without notice, and without the variable exit 1 with an `EXPERIMENTAL` error

@@ -253,7 +253,11 @@ def _as_json(detections: list[Detection], creds: Credentials) -> list[dict[str, 
             "found": d.found,
             "installed": d.installed,
             "blocked": d.blocked,
-            "command": _preview(d, creds) if d.found and d.agent.install and not d.installed else None,
+            "command": (
+                _preview(d, creds)
+                if d.found and d.agent.install and not d.installed and not d.blocked
+                else None
+            ),
             "docs_url": d.agent.docs_url,
         }
         for d in detections

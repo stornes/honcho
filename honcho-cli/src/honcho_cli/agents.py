@@ -11,8 +11,10 @@ the agent's own commands. Three kinds:
 
 - ``plugin``: the agent has an official Honcho plugin, installed with the
   agent's own plugin commands.
-- ``mcp``: the hosted Honcho MCP server, registered with the agent's own
-  ``mcp add`` command, plus the honcho-memory skill.
+- ``mcp``: Honcho MCP for Codex — hosted ``mcp.honcho.dev`` when the CLI
+  points at ``api.honcho.dev``, otherwise a local stdio MCP with
+  ``HONCHO_API_URL`` / ``HONCHO_API_KEY`` from ``~/.honcho/config.json``,
+  plus the honcho-memory skill.
 - ``suggest``: ``honcho install`` changes nothing and points at the setup guide.
   Cloud agents (Grok Bot) get a setup prompt to paste instead.
 
@@ -211,20 +213,70 @@ def _claude_code_install(_: Credentials) -> list[list[str]]:
     ]
 
 
+def _mcp_package_dir() -> Path | None:
+    """Directory of this repo's ``mcp/`` package (stdio host for self-hosted Honcho).
+
+    ``HONCHO_MCP_DIR`` wins. Otherwise walk from the current working directory
+    upward for ``mcp/src/stdio.ts`` — so ``honcho install`` from a honcho
+    checkout (or ``connect_agents.sh --install``) finds it without extra env.
+    """
+    override = os.environ.get("HONCHO_MCP_DIR", "").strip()
+    if override:
+        path = Path(override).expanduser()
+        return path if _exists(path / "src" / "stdio.ts") else None
+    here = Path.cwd().resolve()
+    for root in (here, *here.parents):
+        candidate = root / "mcp"
+        if _exists(candidate / "src" / "stdio.ts"):
+            return candidate
+    return None
+
+
+def _codex_self_hosted_block(creds: Credentials) -> str | None:
+    """Why Codex can't install against a non-hosted Honcho, or None when ready."""
+    if creds.hosted:
+        return None
+    missing: list[str] = []
+    if not shutil.which("bun"):
+        missing.append("bun on PATH")
+    if _mcp_package_dir() is None:
+        missing.append("the mcp/ package (set HONCHO_MCP_DIR or run from a honcho checkout)")
+    if not missing:
+        return None
+    return f"self-hosted Codex needs {', '.join(missing)}; see {MCP_DOCS}#run-locally"
+
+
 def _codex_install(creds: Credentials) -> list[list[str]]:
-    # `codex mcp add --url` reads a bearer token only from an env var, so the
-    # key from the config goes in mcp-remote's header instead. This entry is the
-    # one copy of the key outside ~/.honcho/config.json.
+    # Hosted: mcp-remote → mcp.honcho.dev. Codex's `--url` form only reads a
+    # bearer from an env var, so the key rides in mcp-remote's header instead —
+    # the one copy of the key outside ~/.honcho/config.json.
+    # Self-hosted: stdio MCP from this repo's mcp/ package, with HONCHO_API_URL
+    # + HONCHO_API_KEY from the CLI config (Railway URL + JWT).
+    skill = Quiet([
+        "npx", "-y", "skills", "add", "plastic-labs/honcho", "--skill", "honcho-memory",
+        "--agent", "codex", "--global", "--yes",
+    ])
+    if creds.hosted:
+        return [
+            [
+                "codex", "mcp", "add", "honcho", "--",
+                "npx", "-y", "mcp-remote", MCP_URL,
+                "--header", f"Authorization:Bearer {creds.api_key}",
+                "--header", "X-Honcho-Plugin:codex",
+            ],
+            skill,
+        ]
+    mcp_dir = _mcp_package_dir()
+    assert mcp_dir is not None  # detect() blocks before install when missing
     return [
+        Quiet(["bun", "--cwd", str(mcp_dir), "install", "--frozen-lockfile"]),
         [
-            "codex", "mcp", "add", "honcho", "--",
-            "npx", "-y", "mcp-remote", MCP_URL,
-            "--header", f"Authorization:Bearer {creds.api_key}",
-            "--header", "X-Honcho-Plugin:codex",
+            "codex", "mcp", "add", "honcho",
+            "--env", f"HONCHO_API_KEY={creds.api_key}",
+            "--env", f"HONCHO_API_URL={creds.base_url.rstrip('/')}",
+            "--", "bun", "--cwd", str(mcp_dir), "src/stdio.ts",
         ],
-        # the skill that tells Codex when to recall and record, installed by vercel-labs/skills
-        Quiet(["npx", "-y", "skills", "add", "plastic-labs/honcho", "--skill", "honcho-memory",
-               "--agent", "codex", "--global", "--yes"]),
+        skill,
     ]
 
 
@@ -276,7 +328,6 @@ class Agent:
     has_honcho: Callable[[], bool | None] = field(default=lambda: None)
     install: Callable[[Credentials], list[list[str]]] | None = None
     requires: tuple[str, ...] = ()
-    hosted_only: bool = False  # the hosted MCP server can't reach a self-hosted Honcho
     activate: str | None = None  # extra step after install, beyond restarting the agent
     notes: Callable[[], list[str]] = field(default=lambda: [])  # warnings to show once installed
 
@@ -296,7 +347,7 @@ AGENTS: tuple[Agent, ...] = (
         bins=("codex",), paths=lambda: [_env_path("CODEX_HOME", _home() / ".codex")],
         caller_env=("CODEX_THREAD_ID", "CODEX_SANDBOX", "CODEX_CI"),
         has_honcho=_codex_has_honcho, install=_codex_install,
-        requires=("codex", "npx"), hosted_only=True,
+        requires=("codex", "npx"),  # self-hosted also needs bun + mcp/; see detect()
     ),
     Agent(
         id="hermes", name="Hermes Agent", kind="plugin",
@@ -407,8 +458,8 @@ def detect(agent: Agent, creds: Credentials | None = None) -> Detection:
     except Exception:
         installed = None
     blocked = None
-    if not installed and agent.hosted_only and creds is not None and not creds.hosted:
-        blocked = f"only works with api.honcho.dev; see {agent.docs_url}"
+    if not installed and agent.id == "codex" and creds is not None:
+        blocked = _codex_self_hosted_block(creds)
     return Detection(agent, found=True, installed=installed, blocked=blocked)
 
 
