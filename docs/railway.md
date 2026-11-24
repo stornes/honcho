@@ -21,18 +21,19 @@ This server has no browser login. Device login in `honcho init` is only for mana
 From the repo root (after `railway login` once):
 
 ```bash
-./scripts/connect_agents.sh
-# or: ./scripts/connect_agents.sh --install
-# or: ./scripts/connect_agents.sh --memstrat-dir /path/to/memstrat-mcp
+./scripts/connect_agents.sh --install
+# or pass the public URL explicitly:
+# ./scripts/connect_agents.sh --base-url https://<your-api-domain> --install
+# or: ./scripts/connect_agents.sh --memstrat-dir /path/to/memstrat-mcp --install
 ```
 
-The script checks `railway` and `uv`, links the Railway project if needed, mints an admin JWT from `AUTH_JWT_SECRET`, and writes local config **without printing the secret or the token**:
+The script checks `railway` and `uv`, links project `honcho` / environment `production` / service `api` (no hidden prompts), discovers the api public domain unless you pass `--base-url` or `HONCHO_BASE_URL`, mints an admin JWT from Railway `AUTH_JWT_SECRET` with `PYTHON_DOTENV_DISABLED=1` so a local `.env` cannot override it, and writes local config **without printing the secret or the token**:
 
 - `~/.honcho/config.json` — honcho CLI + plugins (`apiKey` + `environmentUrl`)
 - `~/.honcho/agent.env` — `HONCHO_BASE_URL` + `HONCHO_JWT` for MemStrat / Cursor (chmod 600)
 - `~/.honcho/cursor-secret-slots.env.example` — empty slot names to fill once in Cursor or 1Password
 
-Fill Cursor dashboard secret slots `HONCHO_BASE_URL` and `HONCHO_JWT` once from `agent.env`. Do not paste them into chat or commit them.
+No Railway hostname is hardcoded. Fill Cursor dashboard secret slots `HONCHO_BASE_URL` and `HONCHO_JWT` once from `agent.env`. Do not paste them into chat or commit them.
 
 Manual mint (debug only):
 

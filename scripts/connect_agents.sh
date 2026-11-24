@@ -5,10 +5,12 @@
 # and ~/.honcho/agent.env, and never print the secret or the token.
 #
 # Usage (from the honcho repo root, or any cwd — the script finds itself):
-#   ./scripts/connect_agents.sh
 #   ./scripts/connect_agents.sh --install
+#   ./scripts/connect_agents.sh --base-url https://<your-api-domain>
 #   ./scripts/connect_agents.sh --memstrat-dir ~/Projects/memstrat-mcp
-#   ./scripts/connect_agents.sh --base-url https://api-production-….up.railway.app
+#
+# Base URL: pass --base-url / HONCHO_BASE_URL, or the script discovers the
+# public domain on the linked Railway api service. No hostname is hardcoded.
 #
 # Prerequisites (once): railway login, and this project linked or linkable.
 # Do not commit agent.env, JWTs, or AUTH_JWT_SECRET.
@@ -18,10 +20,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-DEFAULT_BASE_URL="https://api-production-ab029ab8.up.railway.app"
-BASE_URL="${HONCHO_BASE_URL:-$DEFAULT_BASE_URL}"
+# Empty until --base-url / HONCHO_BASE_URL / Railway domain discovery fills it.
+BASE_URL="${HONCHO_BASE_URL:-}"
+BASE_URL_FROM_ENV=0
+[[ -n "${HONCHO_BASE_URL:-}" ]] && BASE_URL_FROM_ENV=1
+
 RAILWAY_SERVICE="${HONCHO_RAILWAY_SERVICE:-api}"
 RAILWAY_PROJECT="${HONCHO_RAILWAY_PROJECT:-honcho}"
+RAILWAY_ENVIRONMENT="${HONCHO_RAILWAY_ENVIRONMENT:-production}"
 HONCHO_HOME="${HONCHO_HOME:-${HOME}/.honcho}"
 CONFIG_FILE="${HONCHO_HOME}/config.json"
 AGENT_ENV="${HONCHO_HOME}/agent.env"
@@ -38,10 +44,11 @@ Connect agents to self-hosted Honcho (one command).
   ./scripts/connect_agents.sh [options]
 
 Options:
-  --base-url URL       Public API URL (default: production Railway api,
-                       or HONCHO_BASE_URL if set)
+  --base-url URL       Public API URL (or set HONCHO_BASE_URL). If omitted,
+                       discover from `railway domain list` on the api service
   --service NAME       Railway service that holds AUTH_JWT_SECRET (default: api)
   --project NAME       Railway project name for link (default: honcho)
+  --environment NAME   Railway environment for link (default: production)
   --memstrat-dir PATH  Also write HONCHO_* into PATH/.env (empty slots filled)
   --install            Run `honcho install` after writing config
   --expires DURATION   JWT expiry for generate_jwt.py (default: never)
@@ -54,7 +61,7 @@ Writes (chmod 600 where secrets live):
   ~/.honcho/cursor-secret-slots.env.example
                                      empty slot names to fill once in Cursor/1Password
 
-Never prints AUTH_JWT_SECRET or the JWT.
+Never prints AUTH_JWT_SECRET or the JWT. Never hardcodes a Railway hostname.
 EOF
 }
 
@@ -63,9 +70,10 @@ die() { log "error: $*"; exit 1; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --base-url) BASE_URL="${2:?}"; shift 2 ;;
+    --base-url) BASE_URL="${2:?}"; BASE_URL_FROM_ENV=0; shift 2 ;;
     --service) RAILWAY_SERVICE="${2:?}"; shift 2 ;;
     --project) RAILWAY_PROJECT="${2:?}"; shift 2 ;;
+    --environment) RAILWAY_ENVIRONMENT="${2:?}"; shift 2 ;;
     --memstrat-dir) MEMSTRAT_DIR="${2:?}"; shift 2 ;;
     --install) RUN_INSTALL=1; shift ;;
     --expires) EXPIRES="${2:?}"; shift 2 ;;
@@ -101,28 +109,106 @@ ensure_railway_link() {
     log "railway: already linked"
     return
   fi
-  log "railway: not linked in this directory — running: railway link --project ${RAILWAY_PROJECT}"
+  log "railway: not linked — running: railway link --project ${RAILWAY_PROJECT} --environment ${RAILWAY_ENVIRONMENT} --service ${RAILWAY_SERVICE}"
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "dry-run: would run railway link --project ${RAILWAY_PROJECT}"
+    log "dry-run: would run railway link with project/environment/service (no hidden prompt)"
     return
   fi
-  # Non-interactive when possible; falls back to the CLI's own prompts.
-  if ! railway link --project "${RAILWAY_PROJECT}" 2>/dev/null; then
-    railway link --project "${RAILWAY_PROJECT}" || die "railway link failed. Run \`railway login\` once, then retry from ${REPO_ROOT}."
+  # Pass --environment so multi-env projects do not hang on a prompt.
+  # Keep stderr visible; do not discard it.
+  railway link \
+    --project "${RAILWAY_PROJECT}" \
+    --environment "${RAILWAY_ENVIRONMENT}" \
+    --service "${RAILWAY_SERVICE}" \
+    || die "railway link failed. Run \`railway login\` once, then retry from ${REPO_ROOT}."
+}
+
+discover_base_url() {
+  # Prefer an explicit URL. Otherwise read the api service's public domain.
+  local raw host
+  if [[ -n "$BASE_URL" ]]; then
+    printf '%s' "$BASE_URL"
+    return
   fi
+  raw="$(railway domain list \
+    --project "${RAILWAY_PROJECT}" \
+    --environment "${RAILWAY_ENVIRONMENT}" \
+    --service "${RAILWAY_SERVICE}" \
+    --json 2>/dev/null)" \
+    || die "could not list Railway domains for service ${RAILWAY_SERVICE}. Pass --base-url or set HONCHO_BASE_URL."
+
+  host="$(DOMAIN_JSON="$raw" python3 - <<'PY'
+import json, os, sys
+
+raw = os.environ.get("DOMAIN_JSON", "").strip()
+if not raw:
+    sys.exit(1)
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(1)
+
+rows = data if isinstance(data, list) else data.get("domains") or data.get("items") or []
+if isinstance(data, dict) and not rows:
+    rows = [data]
+
+hosts: list[str] = []
+for row in rows:
+    if isinstance(row, str):
+        hosts.append(row)
+        continue
+    if not isinstance(row, dict):
+        continue
+    for key in ("domain", "host", "hostname", "name", "url"):
+        val = row.get(key)
+        if isinstance(val, str) and val.strip():
+            hosts.append(val.strip())
+            break
+
+# Prefer railway.app hosts; otherwise first entry.
+preferred = [h for h in hosts if "railway.app" in h] or hosts
+if not preferred:
+    sys.exit(1)
+host = preferred[0]
+if host.startswith("https://") or host.startswith("http://"):
+    print(host.rstrip("/"), end="")
+else:
+    print("https://" + host.rstrip("/"), end="")
+PY
+)" || die "no public domain on Railway service ${RAILWAY_SERVICE}. Generate one on api, or pass --base-url / HONCHO_BASE_URL."
+
+  printf '%s' "$host"
+}
+
+resolve_base_url() {
+  local url
+  url="$(discover_base_url)"
+  url="${url%/}"
+  [[ -n "$url" ]] || die "empty base URL"
+  case "$url" in
+    https://*|http://*) ;;
+    *) die "base URL must be http(s): got ${url}" ;;
+  esac
+  printf '%s' "$url"
 }
 
 fetch_jwt_secret() {
   # Capture only; never echo.
   local kv secret
-  kv="$(railway variable list --service "${RAILWAY_SERVICE}" --kv 2>/dev/null)" \
-    || die "could not list Railway variables for service ${RAILWAY_SERVICE}. Are you logged in and linked?"
+  kv="$(railway variable list \
+    --project "${RAILWAY_PROJECT}" \
+    --environment "${RAILWAY_ENVIRONMENT}" \
+    --service "${RAILWAY_SERVICE}" \
+    --kv 2>/dev/null)" \
+    || die "could not list Railway variables for service ${RAILWAY_SERVICE}. Are you logged in?"
   secret="$(printf '%s\n' "$kv" | sed -n 's/^AUTH_JWT_SECRET=//p' | head -n1)"
   [[ -n "$secret" ]] || die "AUTH_JWT_SECRET missing on Railway service ${RAILWAY_SERVICE}"
   printf '%s' "$secret"
 }
 
 mint_jwt() {
+  # PYTHON_DOTENV_DISABLED skips load_dotenv(override=True) in src.config so a
+  # local repo .env cannot replace the Railway AUTH_JWT_SECRET we just fetched.
   local secret="$1"
   local -a args=(python scripts/generate_jwt.py --admin --print-only)
   if [[ -n "$EXPIRES" ]]; then
@@ -130,7 +216,7 @@ mint_jwt() {
   fi
   (
     cd "$REPO_ROOT"
-    AUTH_JWT_SECRET="$secret" uv run --quiet "${args[@]}"
+    PYTHON_DOTENV_DISABLED=1 AUTH_JWT_SECRET="$secret" uv run --quiet "${args[@]}"
   )
 }
 
@@ -235,18 +321,29 @@ main() {
   check_deps
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "dry-run: would link railway project ${RAILWAY_PROJECT} (service ${RAILWAY_SERVICE})"
-    log "dry-run: would mint admin JWT via scripts/generate_jwt.py --admin --print-only"
+    log "dry-run: would link railway project ${RAILWAY_PROJECT} env ${RAILWAY_ENVIRONMENT} service ${RAILWAY_SERVICE}"
+    if [[ -n "$BASE_URL" ]]; then
+      log "dry-run: base URL ${BASE_URL}"
+    else
+      log "dry-run: would discover base URL via railway domain list (no hardcoded host)"
+    fi
+    log "dry-run: would mint admin JWT with PYTHON_DOTENV_DISABLED=1 (Railway secret wins)"
     log "dry-run: would write ${CONFIG_FILE}"
     log "dry-run: would write ${AGENT_ENV}"
     log "dry-run: would write ${CURSOR_SLOTS}"
     [[ -n "$MEMSTRAT_DIR" ]] && log "dry-run: would update ${MEMSTRAT_DIR}/.env"
     [[ "$RUN_INSTALL" -eq 1 ]] && log "dry-run: would run honcho install"
-    log "dry-run: base URL ${BASE_URL}"
     exit 0
   fi
 
   ensure_railway_link
+  BASE_URL="$(resolve_base_url)"
+  # Show the resolved URL so the user can confirm it matches the linked project.
+  if [[ "$BASE_URL_FROM_ENV" -eq 1 ]]; then
+    log "using API ${BASE_URL} (from HONCHO_BASE_URL)"
+  else
+    log "using API ${BASE_URL}"
+  fi
   probe_health "$BASE_URL"
 
   local secret token
