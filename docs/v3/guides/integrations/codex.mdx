@@ -13,7 +13,7 @@ Give Codex long-term memory that survives context resets, session restarts, and 
 - **[Node](https://nodejs.org)** on your `PATH` (runs the installer and the hooks)
 
 <Tip>
-Setting up more than one agent? `uvx honcho-cli install` finds the agents on this machine and adds Honcho to the ones you pick. For Codex it adds the [Honcho MCP server](/v3/guides/integrations/mcp) and the `honcho-memory` skill, but not this plugin's hooks. Hooks are what save every turn and inject memory automatically, so follow the steps below for the full plugin.
+Setting up more than one agent? `uvx honcho-cli install` finds the agents on this machine and adds Honcho to the ones you pick. For Codex it adds the [Honcho MCP server](/v3/guides/integrations/mcp) and the `honcho-memory` skill, but not this plugin's hooks. Hooks are what save every turn and inject memory automatically, so follow the steps below for the full plugin. Self-hosted Honcho (a non-`api.honcho.dev` `environmentUrl` / `HONCHO_BASE_URL` plus API key or JWT in `~/.honcho/config.json`) is supported: install registers a local stdio MCP aimed at that URL instead of `mcp.honcho.dev` (needs [Bun](https://bun.sh) and the repo `mcp/` package).
 </Tip>
 
 ## Quick Start
